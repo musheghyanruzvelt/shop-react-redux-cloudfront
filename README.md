@@ -1,71 +1,43 @@
-# React-shop-cloudfront
+# My Store App
 
-This is frontend starter project for nodejs-aws mentoring program. It uses the following technologies:
+## Deployment URLs
 
-- [Vite](https://vitejs.dev/) as a project bundler
-- [React](https://beta.reactjs.org/) as a frontend framework
-- [React-router-dom](https://reactrouterdotcom.fly.dev/) as a routing library
-- [MUI](https://mui.com/) as a UI framework
-- [React-query](https://react-query-v3.tanstack.com/) as a data fetching library
-- [Formik](https://formik.org/) as a form library
-- [Yup](https://github.com/jquense/yup) as a validation schema
-- [Serverless](https://serverless.com/) as a serverless framework
-- [Vitest](https://vitest.dev/) as a test runner
-- [MSW](https://mswjs.io/) as an API mocking library
-- [Eslint](https://eslint.org/) as a code linting tool
-- [Prettier](https://prettier.io/) as a code formatting tool
-- [TypeScript](https://www.typescriptlang.org/) as a type checking tool
+- **CloudFront URL**: https://d2j914rf2e73ud.cloudfront.net
+- **S3 Bucket URL**:
+  http://deploywebappstack-deploymentfrontendbucket67ceb713-qccfc084zife.s3.amazonaws.com
+
+> Note: S3 direct access returns 403. The site is served exclusively via
+> CloudFront.
+
+## Task 2.1 — Manual Deployment
+
+1. Created S3 bucket via AWS Console and configured static website hosting
+2. Built the app (`npm run build`) and manually uploaded `dist/` contents to S3
+3. Verified app was accessible via S3 website endpoint
+4. Created CloudFront distribution pointing to S3 bucket
+5. Updated S3 bucket policy to allow CloudFront access only (OAC)
+6. Verified app was accessible via CloudFront URL
+7. Made visible changes, re-uploaded to S3, and created CloudFront invalidation
+   manually
+
+## Task 2.2 — Automated Deployment (AWS CDK)
+
+### Scripts
+
+- `npm run deploy` — Build + upload to S3 + deploy CloudFront (automated)
+- `npm run cdk:deploy` — Deploy CDK stack only
+- `npm run cdk:destroy` — Tear down all AWS resources
+
+### Infrastructure
+
+- S3 bucket with blocked public access
+- CloudFront distribution with OAC (Origin Access Control)
+- SPA routing via 403/404 error responses → index.html
+- Automated cache invalidation via `BucketDeployment`
 
 ## Available Scripts
 
-### `start`
+### Development
 
-Starts the project in dev mode with mocked API on local environment.
-
-### `build`
-
-Builds the project for production in `dist` folder.
-
-### `preview`
-
-Starts the project in production mode on local environment.
-
-### `test`, `test:ui`, `test:coverage`
-
-Runs tests in console, in browser or with coverage.
-
-### `lint`, `prettier`
-
-Runs linting and formatting for all files in `src` folder.
-
-### `client:deploy`, `client:deploy:nc`
-
-Deploy the project build from `dist` folder to configured in `serverless.yml` AWS S3 bucket with or without confirmation.
-
-### `client:build:deploy`, `client:build:deploy:nc`
-
-Combination of `build` and `client:deploy` commands with or without confirmation.
-
-### `cloudfront:setup`
-
-Deploy configured in `serverless.yml` stack via CloudFormation.
-
-### `cloudfront:domainInfo`
-
-Display cloudfront domain information in console.
-
-### `cloudfront:invalidateCache`
-
-Invalidate cloudfront cache.
-
-### `cloudfront:build:deploy`, `cloudfront:build:deploy:nc`
-
-Combination of `client:build:deploy` and `cloudfront:invalidateCache` commands with or without confirmation.
-
-### `cloudfront:update:build:deploy`, `cloudfront:update:build:deploy:nc`
-
-Combination of `cloudfront:setup` and `cloudfront:build:deploy` commands with or without confirmation.
-
-### `serverless:remove`
-
-Remove an entire stack configured in `serverless.yml` via CloudFormation.
+- `npm start` — Run locally
+- `npm run build` — Build for production
