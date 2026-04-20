@@ -12,8 +12,8 @@
     "lint": "eslint --ignore-path .gitignore --fix src",
     "prettier": "prettier src --write",
     "copy:build": "node -e \"require('fs').cpSync('dist', 'infra/resources/build', {recursive: true})\"",
-    "cdk:deploy": "cd infra && npx cdk deploy --require-approval never",
-    "cdk:destroy": "cd infra && npx cdk destroy --force",
+    "cdk:deploy": "cd infra && npx cdk deploy --all --require-approval never",
+    "cdk:destroy": "cd infra && npx cdk destroy --all --force",
     "deploy": "npm run build && npm run copy:build && npm run cdk:deploy"
   },
   "dependencies": {
