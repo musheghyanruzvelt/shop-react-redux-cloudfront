@@ -7,8 +7,9 @@ import {
   RemovalPolicy,
 } from "aws-cdk-lib";
 import { Construct } from "constructs";
+import { join } from "path";
 
-const path = "./resources/build";
+const buildPath = join(__dirname, "../../dist");
 
 export class DeploymentService extends Construct {
   constructor(scope: Construct, id: string) {
@@ -52,7 +53,7 @@ export class DeploymentService extends Construct {
 
     // Deploy build files to S3 + invalidate CloudFront
     new aws_s3_deployment.BucketDeployment(this, "BucketDeployment", {
-      sources: [aws_s3_deployment.Source.asset(path)],
+      sources: [aws_s3_deployment.Source.asset(buildPath)],
       destinationBucket: hostingBucket,
       distribution,
       distributionPaths: ["/*"],
