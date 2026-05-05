@@ -1,58 +1,91 @@
-import { CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
-import { aws_apigateway, aws_lambda } from "aws-cdk-lib";
-import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { Stack, StackProps, Duration, RemovalPolicy } from "aws-cdk-lib";
 import { Construct } from "constructs";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { join } from "path";
+
+const PRODUCTS_TABLE_NAME = "products";
+const STOCKS_TABLE_NAME = "stocks";
 
 export class ProductServiceStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    const handlersPath = "lib/product-service/handlers";
+    // Products table
+    const productsTable = new dynamodb.Table(this, "ProductsTable", {
+      tableName: PRODUCTS_TABLE_NAME,
+      partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
 
-    const sharedLambdaProps = {
-      runtime: aws_lambda.Runtime.NODEJS_22_X,
-      memorySize: 256,
+    // Stocks table
+    const stocksTable = new dynamodb.Table(this, "StocksTable", {
+      tableName: STOCKS_TABLE_NAME,
+      partitionKey: { name: "product_id", type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const commonEnv = {
+      PRODUCTS_TABLE_NAME,
+      STOCKS_TABLE_NAME,
+    };
+
+    const commonLambdaProps = {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      memorySize: 512,
       timeout: Duration.seconds(10),
-      bundling: { minify: true, sourceMap: true },
+      environment: commonEnv,
     };
 
     const getProductsList = new NodejsFunction(this, "getProductsList", {
-      ...sharedLambdaProps,
-      entry: `${handlersPath}/get-product-list.ts`,
+      ...commonLambdaProps,
+      entry: join(__dirname, "handlers/get-product-list.ts"),
       handler: "handler",
-      functionName: "getProductsList",
-      description: "Returns a full list of products",
     });
 
     const getProductsById = new NodejsFunction(this, "getProductsById", {
-      ...sharedLambdaProps,
-      entry: `${handlersPath}/get-product-by-id.ts`,
+      ...commonLambdaProps,
+      entry: join(__dirname, "handlers/get-product-by-id.ts"),
       handler: "handler",
-      functionName: "getProductsById",
-      description: "Returns a single product by productId",
     });
 
-    const api = new aws_apigateway.RestApi(this, "ProductServiceApi", {
-      restApiName: "Product Service",
-      deployOptions: { stageName: "prod" },
+    const createProduct = new NodejsFunction(this, "createProduct", {
+      ...commonLambdaProps,
+      entry: join(__dirname, "handlers/create-product.ts"),
+      handler: "handler",
+    });
+
+    // Permissions
+    productsTable.grantReadData(getProductsList);
+    stocksTable.grantReadData(getProductsList);
+
+    productsTable.grantReadData(getProductsById);
+    stocksTable.grantReadData(getProductsById);
+
+    productsTable.grantWriteData(createProduct);
+    stocksTable.grantWriteData(createProduct);
+
+    // API Gateway
+    const api = new apigateway.RestApi(this, "ProductsApi", {
+      restApiName: "Products Service",
       defaultCorsPreflightOptions: {
-        allowOrigins: aws_apigateway.Cors.ALL_ORIGINS,
-        allowMethods: aws_apigateway.Cors.ALL_METHODS,
+        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowMethods: apigateway.Cors.ALL_METHODS,
       },
     });
 
-    const productsResource = api.root.addResource("products");
-    productsResource.addMethod(
+    const products = api.root.addResource("products");
+    products.addMethod("GET", new apigateway.LambdaIntegration(getProductsList));
+    products.addMethod("POST", new apigateway.LambdaIntegration(createProduct));
+
+    const productById = products.addResource("{productId}");
+    productById.addMethod(
       "GET",
-      new aws_apigateway.LambdaIntegration(getProductsList),
+      new apigateway.LambdaIntegration(getProductsById)
     );
-
-    productsResource
-      .addResource("{productId}")
-      .addMethod("GET", new aws_apigateway.LambdaIntegration(getProductsById));
-
-    new CfnOutput(this, "ProductServiceApiUrl", {
-      value: api.url,
-    });
   }
 }
