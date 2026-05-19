@@ -1,9 +1,19 @@
-import { Stack, StackProps, Duration, RemovalPolicy } from "aws-cdk-lib";
+import {
+  Stack,
+  StackProps,
+  Duration,
+  RemovalPolicy,
+  CfnOutput,
+} from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { join } from "path";
 
 const PRODUCTS_TABLE_NAME = "products";
@@ -13,7 +23,6 @@ export class ProductServiceStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // Products table
     const productsTable = new dynamodb.Table(this, "ProductsTable", {
       tableName: PRODUCTS_TABLE_NAME,
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
@@ -21,13 +30,25 @@ export class ProductServiceStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
-    // Stocks table
     const stocksTable = new dynamodb.Table(this, "StocksTable", {
       tableName: STOCKS_TABLE_NAME,
       partitionKey: { name: "product_id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+
+    const catalogItemsQueue = new sqs.Queue(this, "CatalogItemsQueue", {
+      queueName: "catalogItemsQueue",
+      visibilityTimeout: Duration.seconds(30),
+    });
+
+    const createProductTopic = new sns.Topic(this, "CreateProductTopic", {
+      topicName: "createProductTopic",
+    });
+
+    createProductTopic.addSubscription(
+      new snsSubscriptions.EmailSubscription("ruzveltmusheghyan@gmail.com"),
+    );
 
     const commonEnv = {
       PRODUCTS_TABLE_NAME,
@@ -59,6 +80,28 @@ export class ProductServiceStack extends Stack {
       handler: "handler",
     });
 
+    // catalogBatchProcess lambda
+    const catalogBatchProcess = new NodejsFunction(
+      this,
+      "catalogBatchProcess",
+      {
+        ...commonLambdaProps,
+        entry: join(__dirname, "handlers/catalog-batch-process.ts"),
+        handler: "handler",
+        environment: {
+          ...commonEnv,
+          SNS_TOPIC_ARN: createProductTopic.topicArn,
+        },
+      },
+    );
+
+    // SQS triggers catalogBatchProcess with batches of 5
+    catalogBatchProcess.addEventSource(
+      new SqsEventSource(catalogItemsQueue, {
+        batchSize: 5,
+      }),
+    );
+
     // Permissions
     productsTable.grantReadData(getProductsList);
     stocksTable.grantReadData(getProductsList);
@@ -68,6 +111,10 @@ export class ProductServiceStack extends Stack {
 
     productsTable.grantWriteData(createProduct);
     stocksTable.grantWriteData(createProduct);
+
+    productsTable.grantWriteData(catalogBatchProcess);
+    stocksTable.grantWriteData(catalogBatchProcess);
+    createProductTopic.grantPublish(catalogBatchProcess);
 
     // API Gateway
     const api = new apigateway.RestApi(this, "ProductsApi", {
@@ -79,13 +126,27 @@ export class ProductServiceStack extends Stack {
     });
 
     const products = api.root.addResource("products");
-    products.addMethod("GET", new apigateway.LambdaIntegration(getProductsList));
+    products.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(getProductsList),
+    );
     products.addMethod("POST", new apigateway.LambdaIntegration(createProduct));
 
     const productById = products.addResource("{productId}");
     productById.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(getProductsById)
+      new apigateway.LambdaIntegration(getProductsById),
     );
+
+    // Outputs to share with Import Service Stack
+    new CfnOutput(this, "CatalogItemsQueueUrl", {
+      value: catalogItemsQueue.queueUrl,
+      exportName: "CatalogItemsQueueUrl",
+    });
+
+    new CfnOutput(this, "CatalogItemsQueueArn", {
+      value: catalogItemsQueue.queueArn,
+      exportName: "CatalogItemsQueueArn",
+    });
   }
 }

@@ -1,10 +1,11 @@
-import { Stack, StackProps, Duration, RemovalPolicy } from "aws-cdk-lib";
+import { Stack, StackProps, Duration, RemovalPolicy, Fn } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as s3n from "aws-cdk-lib/aws-s3-notifications";
+import * as sqs from "aws-cdk-lib/aws-sqs";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { join } from "path";
 
@@ -39,6 +40,15 @@ export class ImportServiceStack extends Stack {
       retainOnDelete: false,
     });
 
+    // Import the SQS queue from ProductServiceStack
+    const catalogItemsQueueArn = Fn.importValue("CatalogItemsQueueArn");
+    const catalogItemsQueueUrl = Fn.importValue("CatalogItemsQueueUrl");
+    const catalogItemsQueue = sqs.Queue.fromQueueArn(
+      this,
+      "CatalogItemsQueue",
+      catalogItemsQueueArn,
+    );
+
     const commonLambdaProps = {
       runtime: lambda.Runtime.NODEJS_20_X,
       memorySize: 512,
@@ -56,7 +66,6 @@ export class ImportServiceStack extends Stack {
       },
     });
 
-    // Allow lambda to PUT objects to the bucket (needed for signed PUT URL)
     importBucket.grantPut(importProductsFile);
     importBucket.grantReadWrite(importProductsFile);
 
@@ -70,11 +79,15 @@ export class ImportServiceStack extends Stack {
       },
       environment: {
         BUCKET_NAME: importBucket.bucketName,
+        SQS_QUEUE_URL: catalogItemsQueueUrl,
       },
     });
 
     importBucket.grantReadWrite(importFileParser);
     importBucket.grantDelete(importFileParser);
+
+    // Allow importFileParser to send messages to SQS
+    catalogItemsQueue.grantSendMessages(importFileParser);
 
     // S3 Trigger -> importFileParser for objects in "uploaded/"
     importBucket.addEventNotification(
