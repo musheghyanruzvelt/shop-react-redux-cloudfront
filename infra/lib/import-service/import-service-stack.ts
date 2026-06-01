@@ -6,11 +6,16 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { join } from "path";
 
+interface ImportServiceStackProps extends StackProps {
+  basicAuthorizerLambda: lambda.IFunction;
+}
+
 export class ImportServiceStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props: ImportServiceStackProps) {
     super(scope, id, props);
 
     // S3 Bucket for CSV uploads
@@ -106,11 +111,65 @@ export class ImportServiceStack extends Stack {
       },
     });
 
+    // ===== AUTHORIZER SETUP =====
+
+    // Role that API Gateway will assume to invoke the authorizer Lambda
+    const authorizerRole = new iam.Role(this, "AuthorizerInvocationRole", {
+      assumedBy: new iam.ServicePrincipal("apigateway.amazonaws.com"),
+    });
+
+    authorizerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["lambda:InvokeFunction"],
+        resources: [props.basicAuthorizerLambda.functionArn],
+      }),
+    );
+
+    // Token Authorizer that uses our basicAuthorizer lambda
+    const authorizer = new apigateway.TokenAuthorizer(this, "BasicAuthorizer", {
+      handler: props.basicAuthorizerLambda,
+      identitySource: "method.request.header.Authorization",
+      assumeRole: authorizerRole,
+      resultsCacheTtl: Duration.seconds(0), // disable cache for testing
+    });
+
+    // Gateway Responses to return proper CORS headers on 401 / 403
+    api.addGatewayResponse("Unauthorized", {
+      type: apigateway.ResponseType.UNAUTHORIZED,
+      statusCode: "401",
+      responseHeaders: {
+        "Access-Control-Allow-Origin": "'*'",
+        "Access-Control-Allow-Headers": "'*'",
+        "Access-Control-Allow-Methods": "'*'",
+      },
+      templates: {
+        "application/json":
+          '{"message": "Authorization header is not provided"}',
+      },
+    });
+
+    api.addGatewayResponse("AccessDenied", {
+      type: apigateway.ResponseType.ACCESS_DENIED,
+      statusCode: "403",
+      responseHeaders: {
+        "Access-Control-Allow-Origin": "'*'",
+        "Access-Control-Allow-Headers": "'*'",
+        "Access-Control-Allow-Methods": "'*'",
+      },
+      templates: {
+        "application/json": '{"message": "Access denied"}',
+      },
+    });
+
+    // ===== END AUTHORIZER SETUP =====
+
     const importResource = api.root.addResource("import");
     importResource.addMethod(
       "GET",
       new apigateway.LambdaIntegration(importProductsFile),
       {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.CUSTOM,
         requestParameters: {
           "method.request.querystring.name": true,
         },
